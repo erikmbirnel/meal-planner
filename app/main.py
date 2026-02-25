@@ -49,6 +49,7 @@ def _build_app() -> Application:
 # ---------------------------------------------------------------------------
 
 fastapi_app = FastAPI(title="Meal Planner Bot")
+app = fastapi_app  # alias expected by ASGI servers
 
 
 @fastapi_app.on_event("startup")
