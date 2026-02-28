@@ -67,7 +67,8 @@ log = logging.getLogger(__name__)
     EDIT_SERVINGS,
     EDIT_CUISINE,
     EDIT_CONFIRM,
-) = range(30, 35)
+    EDIT_RECIPE,
+) = range(30, 36)
 
 (
     RECIPE_SELECT,
@@ -887,6 +888,9 @@ async def _show_edit_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton("🌍 Set cuisine", callback_data="edit_edit_cuisine"),
             InlineKeyboardButton("⭐ Toggle staple", callback_data="edit_toggle_staple"),
         ],
+        [
+            InlineKeyboardButton("📋 Edit recipe", callback_data="edit_edit_recipe"),
+        ],
     ])
     if update.callback_query:
         await update.callback_query.edit_message_text(
@@ -954,6 +958,19 @@ async def handle_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return EDIT_INGREDIENTS
 
+    if data == "edit_edit_recipe":
+        meal_id = context.user_data["edit_meal"]["id"]
+        existing = planner._sheets.get_recipe(meal_id)
+        if existing and existing.get("instructions"):
+            current_text = f"*Current recipe:*\n{existing['instructions']}\n\n"
+        else:
+            current_text = "_No recipe saved yet._\n\n"
+        await query.edit_message_text(
+            current_text + "📋 Type the new recipe below. I'll save exactly what you write.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return EDIT_RECIPE
+
     return EDIT_CONFIRM
 
 
@@ -984,6 +1001,15 @@ async def edit_servings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 async def edit_cuisine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["edit_meal"]["cuisine"] = update.message.text.strip().title()
+    return await _show_edit_confirm(update, context)
+
+
+async def edit_recipe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    instructions = update.message.text.strip()
+    meal_id = context.user_data["edit_meal"]["id"]
+    planner = _planner(context)
+    planner._sheets.save_recipe(meal_id, instructions)
+    await update.message.reply_text("✅ Recipe saved.")
     return await _show_edit_confirm(update, context)
 
 
@@ -1420,6 +1446,7 @@ def register_handlers(app: Application) -> None:
             EDIT_SERVINGS: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_servings)],
             EDIT_CUISINE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_cuisine)],
             EDIT_CONFIRM: [CallbackQueryHandler(handle_edit_callback)],
+            EDIT_RECIPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_recipe)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
