@@ -52,7 +52,8 @@ log = logging.getLogger(__name__)
     ADD_SERVINGS,
     ADD_CUISINE,
     ADD_CONFIRM,
-) = range(10, 15)
+    ADD_RECIPE,
+) = range(10, 16)
 
 (
     GEN_CUISINE,
@@ -577,11 +578,19 @@ async def handle_add_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             ingredients=meal_data["ingredients"],
         )
         new_id = planner._sheets.add_meal(meal)
+        context.user_data["new_meal"]["saved_id"] = new_id
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✏️ Add recipe", callback_data="add_recipe_yes"),
+                InlineKeyboardButton("⏭ Skip", callback_data="add_recipe_skip"),
+            ]
+        ])
         await query.edit_message_text(
-            f"✅ *{meal.name}* saved to library (ID: {new_id}).",
+            f"✅ *{meal_data['name']}* saved to library.\n\nWould you like to add a recipe now?",
             parse_mode=ParseMode.MARKDOWN,
+            reply_markup=keyboard,
         )
-        return ConversationHandler.END
+        return ADD_RECIPE
 
     if data == "add_toggle_staple":
         context.user_data["new_meal"]["staple"] = not context.user_data["new_meal"]["staple"]
@@ -612,6 +621,34 @@ async def add_servings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def add_cuisine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["new_meal"]["cuisine"] = update.message.text.strip().title()
     return await _show_add_confirm(update, context)
+
+
+async def handle_add_recipe_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "add_recipe_skip":
+        await query.edit_message_text("Done! No recipe added.")
+        return ConversationHandler.END
+
+    # add_recipe_yes
+    await query.edit_message_text(
+        "📋 Type your recipe steps below. I'll save exactly what you write."
+    )
+    return ADD_RECIPE
+
+
+async def add_recipe_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    instructions = update.message.text.strip()
+    meal_id = context.user_data["new_meal"]["saved_id"]
+    meal_name = context.user_data["new_meal"]["name"]
+    planner = _planner(context)
+    planner._sheets.save_recipe(meal_id, instructions)
+    await update.message.reply_text(
+        f"✅ Recipe for *{meal_name}* saved.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    return ConversationHandler.END
 
 
 # ---------------------------------------------------------------------------
@@ -1351,6 +1388,10 @@ def register_handlers(app: Application) -> None:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, add_cuisine)
             ],
             ADD_CONFIRM: [CallbackQueryHandler(handle_add_callback)],
+            ADD_RECIPE: [
+                CallbackQueryHandler(handle_add_recipe_callback),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_recipe_text),
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
