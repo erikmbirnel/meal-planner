@@ -9,7 +9,7 @@ GEN_*    - /generate flow
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from typing import Optional
 
 from telegram import (
@@ -42,7 +42,9 @@ log = logging.getLogger(__name__)
     PLAN_SWAPPING,
     PLAN_REPLACING,
     PLAN_PICKING_DAY,
-) = range(4)
+    PLAN_MODE_SELECT,
+    PLAN_MANUAL_DAY,
+) = range(6)
 
 (
     ADD_NAME,
@@ -155,7 +157,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
         "👋 *Meal Planner Bot*\n\n"
         "Commands:\n"
-        "/plan — Generate and confirm this week's dinner plan\n"
+        "/plan — Plan this week's dinners (auto-generate or pick manually)\n"
         "/week — Show the current confirmed week plan\n"
         "/add — Add a new meal to the library\n"
         "/edit — Edit an existing meal in the library\n"
@@ -174,24 +176,129 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("⏳ Generating your week plan…")
-    planner = _planner(context)
-    try:
-        plan = planner.generate_week_plan()
-    except ValueError as e:
-        await update.message.reply_text(f"⚠️ {e}")
-        return ConversationHandler.END
-    meals_by_id = await _load_plan_meals(planner, plan)
-    context.user_data["plan"] = plan
-    context.user_data["meals_by_id"] = meals_by_id
-
-    text = _format_plan(plan, meals_by_id)
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎲 Auto-generate", callback_data="plan_mode:auto"),
+            InlineKeyboardButton("📋 Pick manually", callback_data="plan_mode:manual"),
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel")],
+    ])
     await update.message.reply_text(
-        text,
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=_plan_keyboard(plan),
+        "📅 How would you like to plan this week?",
+        reply_markup=keyboard,
     )
-    return PLAN_GENERATED
+    return PLAN_MODE_SELECT
+
+
+async def handle_plan_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    planner = _planner(context)
+
+    if data == "cancel":
+        await query.edit_message_text("Cancelled.")
+        return ConversationHandler.END
+
+    if data == "plan_mode:auto":
+        await query.edit_message_text("⏳ Generating your week plan…")
+        try:
+            new_plan = planner.generate_week_plan()
+        except ValueError as e:
+            await query.edit_message_text(f"⚠️ {e}")
+            return ConversationHandler.END
+        meals_by_id = await _load_plan_meals(planner, new_plan)
+        context.user_data["plan"] = new_plan
+        context.user_data["meals_by_id"] = meals_by_id
+        await query.edit_message_text(
+            _format_plan(new_plan, meals_by_id),
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=_plan_keyboard(new_plan),
+        )
+        return PLAN_GENERATED
+
+    if data == "plan_mode:manual":
+        context.user_data["manual_plan"] = {}
+        return await _prompt_manual_day(update, context, day_idx=0)
+
+    return PLAN_MODE_SELECT
+
+
+async def _prompt_manual_day(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, day_idx: int
+) -> int:
+    planner = _planner(context)
+    meals = planner._sheets.get_all_meals()
+    if not meals:
+        msg = "No meals in the library yet. Use /add first."
+        if update.callback_query:
+            await update.callback_query.edit_message_text(msg)
+        else:
+            await update.message.reply_text(msg)
+        return ConversationHandler.END
+
+    context.user_data["manual_day_idx"] = day_idx
+    day = DAYS[day_idx]
+    progress = f"({day_idx + 1}/7)"
+    text = f"*{DAY_LABELS[day]}* {progress} — pick a meal:"
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=_meals_keyboard(meals, prefix="manual_pick", include_generate=False),
+        )
+    else:
+        await update.message.reply_text(
+            text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=_meals_keyboard(meals, prefix="manual_pick", include_generate=False),
+        )
+    return PLAN_MANUAL_DAY
+
+
+async def handle_manual_day_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    planner = _planner(context)
+
+    if data == "cancel":
+        await query.edit_message_text("Cancelled.")
+        return ConversationHandler.END
+
+    if data.startswith("manual_pick:"):
+        meal_id = int(data.split(":")[1])
+        day_idx = context.user_data["manual_day_idx"]
+        day = DAYS[day_idx]
+        context.user_data["manual_plan"][day] = meal_id
+
+        next_idx = day_idx + 1
+        if next_idx < len(DAYS):
+            return await _prompt_manual_day(update, context, day_idx=next_idx)
+
+        # All 7 days selected — build the WeekPlan and show it
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())  # Monday
+        new_plan = WeekPlan(
+            week_start=week_start,
+            meals=context.user_data["manual_plan"],
+            status="draft",
+            created_at=datetime.now(),
+        )
+        meals_by_id = await _load_plan_meals(planner, new_plan)
+        context.user_data["plan"] = new_plan
+        context.user_data["meals_by_id"] = meals_by_id
+        await query.edit_message_text(
+            _format_plan(new_plan, meals_by_id),
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=_plan_keyboard(new_plan),
+        )
+        return PLAN_GENERATED
+
+    return PLAN_MANUAL_DAY
 
 
 async def handle_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1184,15 +1291,11 @@ def register_handlers(app: Application) -> None:
     plan_conv = ConversationHandler(
         entry_points=[CommandHandler("plan", plan)],
         states={
-            PLAN_GENERATED: [
-                CallbackQueryHandler(handle_plan_callback),
-            ],
-            PLAN_SWAPPING: [
-                CallbackQueryHandler(handle_swap_callback),
-            ],
-            PLAN_REPLACING: [
-                CallbackQueryHandler(handle_replace_callback),
-            ],
+            PLAN_MODE_SELECT: [CallbackQueryHandler(handle_plan_mode_callback)],
+            PLAN_MANUAL_DAY: [CallbackQueryHandler(handle_manual_day_callback)],
+            PLAN_GENERATED: [CallbackQueryHandler(handle_plan_callback)],
+            PLAN_SWAPPING: [CallbackQueryHandler(handle_swap_callback)],
+            PLAN_REPLACING: [CallbackQueryHandler(handle_replace_callback)],
         },
         fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
         per_message=False,
