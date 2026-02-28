@@ -103,6 +103,55 @@ Example:
             meals.append(meal)
         return meals
 
+    def generate_meal_with_recipe(self, title: str, user_notes: str = "") -> dict:
+        """Generate a full meal record + recipe for a given title.
+
+        Returns {"meal": Meal, "instructions": str}.
+        """
+        prompt = (
+            f"Create a complete meal record and recipe for: {title}\n\n"
+            "Return a JSON object with:\n"
+            '- name (string)\n'
+            '- servings (int, default 4)\n'
+            '- cuisine (string, e.g. "Italian", "Mexican", "Asian", "American", "Mediterranean", "Indian")\n'
+            '- staple (bool, true if it\'s a quick weeknight staple)\n'
+            '- ingredients: array of {name, quantity, unit} objects\n'
+            '  - unit can be: "can", "lb", "oz", "cup", "cups", "tbsp", "tsp", "clove", "cloves", "bunch", "stalk", "stalks", or "" for whole items\n'
+            '- instructions (string, numbered cooking steps, concise and practical)\n\n'
+            'Example:\n'
+            '{\n'
+            '  "name": "Chicken Tikka Masala",\n'
+            '  "servings": 4,\n'
+            '  "cuisine": "Indian",\n'
+            '  "staple": false,\n'
+            '  "ingredients": [\n'
+            '    {"name": "chicken breast", "quantity": 1.5, "unit": "lb"},\n'
+            '    {"name": "tomato sauce", "quantity": 1, "unit": "can"}\n'
+            '  ],\n'
+            '  "instructions": "1. Marinate chicken...\\n2. Cook sauce..."\n'
+            '}'
+        )
+        if user_notes:
+            prompt += f"\n\nNotes from the cook:\n{user_notes}"
+        message = self._client.messages.create(
+            model=self._model,
+            max_tokens=2048,
+            system=_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = _extract_json(message.content[0].text)
+        data = json.loads(raw)
+        ingredients = [Ingredient(**ing) for ing in data.get("ingredients", [])]
+        meal = Meal(
+            id=0,
+            name=data.get("name", title),
+            servings=int(data.get("servings", 4)),
+            cuisine=data.get("cuisine", ""),
+            staple=bool(data.get("staple", False)),
+            ingredients=ingredients,
+        )
+        return {"meal": meal, "instructions": data["instructions"]}
+
     def generate_recipe(self, meal: Meal, user_notes: str = "") -> str:
         ing_lines = "\n".join(
             f"- {i.quantity} {i.unit} {i.name}".strip()
