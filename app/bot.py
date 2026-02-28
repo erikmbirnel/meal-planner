@@ -153,6 +153,11 @@ async def _load_plan_meals(planner: MealPlanner, plan: WeekPlan) -> dict[int, Me
 # ---------------------------------------------------------------------------
 
 
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("Cancelled.")
+    return ConversationHandler.END
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
         "👋 *Meal Planner Bot*\n\n"
@@ -1297,7 +1302,7 @@ def register_handlers(app: Application) -> None:
             PLAN_SWAPPING: [CallbackQueryHandler(handle_swap_callback)],
             PLAN_REPLACING: [CallbackQueryHandler(handle_replace_callback)],
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
     )
     app.add_handler(plan_conv)
@@ -1318,7 +1323,7 @@ def register_handlers(app: Application) -> None:
             ],
             ADD_CONFIRM: [CallbackQueryHandler(handle_add_callback)],
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
     )
     app.add_handler(add_conv)
@@ -1331,7 +1336,7 @@ def register_handlers(app: Application) -> None:
             GEN_CONSTRAINTS: [CallbackQueryHandler(handle_gen_constraints)],
             GEN_PICK: [CallbackQueryHandler(handle_gen_pick)],
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
     )
     app.add_handler(gen_conv)
@@ -1346,7 +1351,7 @@ def register_handlers(app: Application) -> None:
             EDIT_CUISINE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_cuisine)],
             EDIT_CONFIRM: [CallbackQueryHandler(handle_edit_callback)],
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
     )
     app.add_handler(edit_conv)
@@ -1362,7 +1367,7 @@ def register_handlers(app: Application) -> None:
             ],
             RECIPE_VIEW: [CallbackQueryHandler(handle_recipe_view_callback)],
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
     )
     app.add_handler(recipe_conv)
@@ -1379,7 +1384,7 @@ def register_handlers(app: Application) -> None:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, today_notes_text),
             ],
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
     )
     app.add_handler(today_conv)
