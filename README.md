@@ -1,6 +1,24 @@
 # Meal Planner Bot
 
-A Telegram bot that plans weekly dinners, maintains a meal library in Google Sheets, and generates shopping lists in Todoist. Uses Claude AI for meal generation.
+A Telegram bot that plans weekly dinners, maintains a meal library in Google Sheets, and generates shopping lists in Todoist. Uses Claude AI for meal generation, ingredient parsing, and recipe writing.
+
+---
+
+## Bot Commands
+
+| Command | Description |
+|---------|-------------|
+| `/start` | Show help |
+| `/plan` | Generate and confirm this week's dinner plan |
+| `/week` | Show the current confirmed week plan |
+| `/today` | Show today's planned meal with ingredients and recipe |
+| `/add` | Add a new meal to the library |
+| `/edit` | Edit an existing meal in the library |
+| `/recipe` | View or generate a recipe for a meal |
+| `/generate` | Generate meal ideas with Claude |
+| `/meals` | List all meals (optionally filter: `/meals italian`) |
+| `/shopping` | Show current Todoist shopping list |
+| `/cancel` | Cancel current operation |
 
 ---
 
@@ -8,22 +26,16 @@ A Telegram bot that plans weekly dinners, maintains a meal library in Google She
 
 Currently the bot responds to anyone who messages it. When you want to lock it down to just you and Becca, here's the plan:
 
-### How it works
-
 Every Telegram user has a unique numeric **user ID**. The bot can check the ID of whoever sent a message and silently ignore anyone not on an allowlist.
 
-### Step 1 — Find your Telegram user IDs
+**Step 1** — Message [@userinfobot](https://t.me/userinfobot) on Telegram. It replies with your user ID. Have Becca do the same.
 
-Message [@userinfobot](https://t.me/userinfobot) on Telegram. It replies with your user ID (a number like `123456789`). Have Becca do the same.
-
-### Step 2 — Add IDs to .env
-
+**Step 2** — Add to `.env`:
 ```env
 ALLOWED_USER_IDS=123456789,987654321
 ```
 
-### Step 3 — Add the setting to config.py
-
+**Step 3** — Add to `config.py`:
 ```python
 allowed_user_ids: list[int] = Field(default=[], alias="ALLOWED_USER_IDS")
 
@@ -35,8 +47,7 @@ def parse_ids(cls, v):
     return v
 ```
 
-### Step 4 — Add a guard function to bot.py
-
+**Step 4** — Add a guard to `bot.py`:
 ```python
 def _is_allowed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     from app.config import settings
@@ -45,22 +56,9 @@ def _is_allowed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     return update.effective_user.id in settings.allowed_user_ids
 ```
 
-### Step 5 — Add the check to every handler entry point
+**Step 5** — Add `if not _is_allowed(update, context): return` at the top of every command handler entry point.
 
-At the top of `start`, `plan`, `add_meal_start`, `generate_start`, `list_meals`, and `shopping`:
-
-```python
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _is_allowed(update, context):
-        return  # Silently ignore
-    ...
-```
-
-### Notes
-
-- Silently ignoring (returning without reply) is better than sending an error — it doesn't confirm the bot exists to strangers.
-- If `ALLOWED_USER_IDS` is left empty in `.env`, the bot stays open to everyone (current behaviour).
-- No library changes needed — this is pure application logic.
+If `ALLOWED_USER_IDS` is left empty, the bot stays open to everyone.
 
 ---
 
@@ -69,159 +67,99 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 - A Google account
 - A Todoist account
 - An Anthropic account (claude.ai)
-- Your Telegram bot token (you already have this from BotFather)
+- Your Telegram bot token (from BotFather)
 - A place to run the bot (covered at the end)
 
 ---
 
 ## Step 1 — Google Sheets setup
 
-You need two things from Google: a **spreadsheet** (the database) and **credentials** (a key that lets the bot read/write it).
-
 ### 1a. Create the spreadsheet
 
 1. Go to [sheets.google.com](https://sheets.google.com) and create a new blank spreadsheet.
 2. Name it something like `Meal Planner`.
-3. At the bottom of the screen you'll see a tab called `Sheet1`. Right-click it → **Rename** → type `meals`.
-4. Click the **+** button at the bottom left to add a second tab. Rename it `weekly_plans`.
-5. Add a third tab. Rename it `ingredient_mappings`.
+3. Create the following tabs (right-click → Rename, or click + to add):
 
-Now add column headers to each tab. Click cell A1 in each tab and type these exactly (one word per cell, moving right with Tab):
-
-**meals tab** — row 1:
+**meals** tab — row 1 headers:
 ```
 id    name    servings    cuisine    staple    ingredients
 ```
 
-**weekly_plans tab** — row 1:
+**weekly_plans** tab — row 1 headers:
 ```
 week_start    mon    tue    wed    thu    fri    sat    sun    status    created_at    confirmed_at
 ```
 
-**ingredient_mappings tab** — row 1:
+**ingredient_mappings** tab — row 1 headers:
 ```
 keyword    todoist_section    display_name
 ```
 
+**recipes** tab — row 1 headers:
+```
+meal_id    instructions    user_notes    generated_at
+```
+
 ### 1b. Get the Spreadsheet ID
 
-Look at the URL in your browser. It looks like:
+From the URL:
 ```
 https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms/edit
 ```
-
-The long string of letters and numbers between `/d/` and `/edit` is your **Spreadsheet ID**. Copy it — you'll need it for `.env`.
+The long string between `/d/` and `/edit` is your **Spreadsheet ID**.
 
 ### 1c. Create Google credentials (service account)
 
-This creates a "robot" Google account that the bot uses to access the spreadsheet.
-
 1. Go to [console.cloud.google.com](https://console.cloud.google.com).
-2. At the top, click the project dropdown → **New Project**. Name it `meal-planner` and click **Create**.
-3. Make sure your new project is selected in the dropdown.
-4. In the left sidebar, go to **APIs & Services** → **Library**.
-5. Search for `Google Sheets API`. Click it → click **Enable**.
-6. Search for `Google Drive API`. Click it → click **Enable**.
-7. In the left sidebar, go to **APIs & Services** → **Credentials**.
-8. Click **+ Create Credentials** at the top → choose **Service account**.
-9. Fill in **Service account name**: `meal-planner-bot`. Click **Create and continue**.
-10. Skip the optional steps and click **Done**.
-11. You'll now see your service account in the list. Click on it.
-12. Go to the **Keys** tab → **Add Key** → **Create new key** → choose **JSON** → click **Create**.
-13. A `.json` file will download automatically. This is your credentials file.
-
-**Move that file** into the `credentials/` folder inside this project and rename it to `google_service_account.json`.
-
-The path in `.env` stays as the default: `./credentials/google_service_account.json`
+2. Create a new project named `meal-planner`.
+3. Enable **Google Sheets API** and **Google Drive API** (APIs & Services → Library).
+4. Go to APIs & Services → Credentials → **+ Create Credentials** → **Service account**.
+5. Name it `meal-planner-bot` → Create and continue → Done.
+6. Click the service account → **Keys** tab → **Add Key** → **Create new key** → JSON.
+7. Save the downloaded file as `credentials/google_service_account.json`.
 
 ### 1d. Share the spreadsheet with the service account
 
-1. Open the JSON credentials file in any text editor.
-2. Find the line that says `"client_email"` — it will look like `meal-planner-bot@meal-planner-xxxxx.iam.gserviceaccount.com`.
-3. Copy that email address.
-4. Go back to your Google Sheet. Click the **Share** button (top right).
-5. Paste that email address in the "Add people" box. Make sure it has **Editor** access. Click **Send**.
-
-The bot can now read and write your spreadsheet.
+1. Open the JSON credentials file and copy the `client_email` value.
+2. In Google Sheets, click **Share** and paste that email with **Editor** access.
 
 ---
 
 ## Step 2 — Todoist setup
 
-### 2a. Create the Italian Store project
+### 2a. Create the Grocery List project
 
-1. In Todoist, click **+** next to **Projects** in the sidebar → name it exactly `Italian Store`.
-2. Open the project. Click **Add section** and create all 13 sections in this exact order:
-   - Produce
-   - Meat
-   - Seafood
-   - Dairy & Eggs
-   - Cheese
-   - Bread & Bakery
-   - Pasta & Grains
-   - Canned Goods
-   - Condiments & Sauces
-   - Spices
-   - Frozen
-   - Drinks
-   - Other
-
-   (The names must match exactly — the bot routes ingredients to sections by name.)
-
-3. Optional: share the project with your partner. Open the project → click the **...** menu → **Share project**.
+1. In Todoist, create a project named exactly `Grocery List`.
+2. Add these 13 sections in order:
+   - Produce, Meat, Seafood, Dairy & Eggs, Cheese, Bread & Bakery, Pasta & Grains, Canned Goods, Condiments & Sauces, Spices, Frozen, Drinks, Other
 
 ### 2b. Get your API token
 
-1. Go to [todoist.com](https://todoist.com) in a browser (the token is not accessible from the mobile app).
-2. Click your **avatar / profile picture** in the top-left corner → **Settings**.
-3. Click the **Integrations** tab.
-4. Inside Integrations, click the **Developer** sub-tab at the top.
-5. Click **Copy API token**.
-
-That token goes in `.env` as `TODOIST_API_TOKEN`.
+Todoist → avatar → Settings → Integrations → Developer → Copy API token.
 
 ---
 
 ## Step 3 — Anthropic API key
 
-1. Go to [console.anthropic.com](https://console.anthropic.com).
-2. Sign in, then go to **API Keys** in the left sidebar.
-3. Click **Create Key**. Give it a name like `meal-planner`. Copy the key immediately — it won't be shown again.
-
-That goes in `.env` as `ANTHROPIC_API_KEY`.
+[console.anthropic.com](https://console.anthropic.com) → API Keys → Create Key.
 
 ---
 
 ## Step 4 — Fill in .env
 
-Copy the example file and fill it in:
-
-```bash
-cp .env.example .env
-```
-
-Open `.env` in a text editor. Fill in each value:
-
 ```env
-# You already have this from BotFather
 TELEGRAM_BOT_TOKEN=1234567890:ABCdefGhIJKlmNoPQRsTUVwxYZ
+TELEGRAM_WEBHOOK_URL=https://your-app.onrender.com/webhook
 
-# Leave this alone for now — you'll set it when you deploy
-TELEGRAM_WEBHOOK_URL=https://your-vps-domain.com/webhook
-
-# Leave as-is (the file you saved to credentials/)
+# For local/Docker deployment (file path):
 GOOGLE_CREDENTIALS_PATH=./credentials/google_service_account.json
+# For Render deployment (paste entire contents of the JSON file):
+# GOOGLE_CREDENTIALS_JSON={"type":"service_account",...}
 
-# The long ID from the spreadsheet URL (Step 1b)
-GOOGLE_SPREADSHEET_ID=1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms
-
-# From Todoist Settings → Integrations (Step 2b)
+GOOGLE_SPREADSHEET_ID=your_spreadsheet_id_here
 TODOIST_API_TOKEN=your_todoist_token_here
-
-# From console.anthropic.com (Step 3)
 ANTHROPIC_API_KEY=sk-ant-...
 
-# Leave these as-is
 HOST=0.0.0.0
 PORT=8000
 ```
@@ -230,9 +168,7 @@ PORT=8000
 
 ## Step 5 — Add seed ingredient mappings
 
-The bot uses the `ingredient_mappings` tab to know which Todoist section to put each ingredient in. Without entries here, everything lands in "Other".
-
-Go to your `ingredient_mappings` tab and add these rows (keyword in column A, section in column B, display name in column C):
+In the `ingredient_mappings` tab, add these rows (keyword → todoist_section → display_name):
 
 | keyword | todoist_section | display_name |
 |---------|----------------|--------------|
@@ -292,26 +228,21 @@ Go to your `ingredient_mappings` tab and add these rows (keyword in column A, se
 | avocado | Produce | Avocado |
 | cilantro | Produce | Cilantro |
 
-You can add more any time. The bot checks if a keyword appears anywhere in the ingredient name, so `chicken` will match `chicken breast`, `chicken thighs`, etc.
-
 ---
 
-## Step 6 — Test locally first
+## Step 6 — Test locally
 
-Before deploying to a server, test on your own computer. This avoids needing a domain or HTTPS.
-
-### Install Python dependencies
+### Install dependencies
 
 ```bash
-cd meal_planner
 python3 -m venv venv
-source venv/bin/activate      # on Mac/Linux
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
 ### Run in polling mode (no webhook needed)
 
-Create a file called `run_polling.py` in the project root:
+Create `run_polling.py` in the project root:
 
 ```python
 from app.config import settings
@@ -323,7 +254,10 @@ from app.bot import register_handlers
 from telegram.ext import Application
 
 app = Application.builder().token(settings.telegram_bot_token).build()
-sheets = SheetsClient(settings.google_credentials_path, settings.google_spreadsheet_id)
+sheets = SheetsClient(
+    spreadsheet_id=settings.google_spreadsheet_id,
+    credentials_path=settings.google_credentials_path,
+)
 todoist = TodoistClient(settings.todoist_api_token)
 claude = ClaudeClient(settings.anthropic_api_key)
 app.bot_data["planner"] = MealPlanner(sheets, todoist, claude)
@@ -331,77 +265,76 @@ register_handlers(app)
 app.run_polling()
 ```
 
-Run it:
-
 ```bash
 python run_polling.py
 ```
 
-If everything is set up correctly you'll see log lines appear and no errors. Open Telegram, message your bot `/start`.
-
 **Test in this order:**
 1. `/start` — bot replies with the command list
-2. `/add` — add 8 or more meals manually (the planner needs 7 to fill a week)
-3. `/meals` — verify they appear, grouped by cuisine
-4. `/plan` — generates a draft week; try Swap and Replace buttons
-5. Confirm the plan — check that Todoist gets items added
-6. `/generate` — generate and save Claude-suggested meals
+2. `/add` — add 8 or more meals (the planner needs 7 to fill a week)
+3. `/meals` — verify they appear grouped by cuisine
+4. `/plan` — generates a draft week; try Swap and Replace buttons, then Confirm
+5. `/week` — verify the confirmed plan displays
+6. `/today` — verify today's meal shows with ingredients
+7. `/recipe` — generate and save a recipe for a meal
+8. `/shopping` — check Todoist items were added
 
 ---
 
-## Step 7 — Deploy to a server
+## Step 7 — Deploy
 
-This is only needed so the bot works 24/7 without your laptop being on.
+### Option A: Render (current setup — Hobby plan, $7/month, 24/7)
 
-### Easiest option: Railway or Render (no server management)
+1. Push to GitHub.
+2. In Render, create a **Web Service** inside your existing project.
+3. Connect the GitHub repo. Runtime: **Docker**.
+4. Add environment variables in the Render dashboard. For Google credentials, set `GOOGLE_CREDENTIALS_JSON` to the full contents of `credentials/google_service_account.json` (paste the entire JSON object).
+5. Set `TELEGRAM_WEBHOOK_URL` to `https://YOUR-APP-NAME.onrender.com/webhook`.
+6. Deploy. The bot registers its webhook automatically on startup.
 
-1. Push this project to a private GitHub repo.
-2. Go to [railway.app](https://railway.app) or [render.com](https://render.com) and connect your repo.
-3. Set all the environment variables from `.env` in their dashboard.
-4. Upload your `google_service_account.json` as a secret file (both platforms support this).
-5. They'll give you a public HTTPS URL like `https://meal-planner-xxxx.railway.app`.
-6. Set `TELEGRAM_WEBHOOK_URL=https://meal-planner-xxxx.railway.app/webhook` in the dashboard env vars.
-7. Deploy. The bot will register its webhook automatically on startup.
+Verify: `https://YOUR-APP-NAME.onrender.com/health` should return `{"status":"ok"}`.
 
-### VPS option (Oracle Cloud Free Tier, Hetzner, etc.)
+### Option B: Oracle Cloud Free Tier (in progress — free forever once provisioned)
 
-1. Provision a server running Ubuntu.
-2. Install Docker: `sudo apt install docker.io`
-3. Point a domain at the server's IP (or use a free subdomain from duckdns.org).
-4. Set up HTTPS with nginx + Let's Encrypt (certbot).
-5. Copy your project files to the server.
-6. Run:
+Oracle Free Tier includes an **Ampere A1 Flex** instance (up to 4 OCPUs, 24 GB RAM) at no cost. The catch is that capacity is often unavailable in less popular regions.
+
+**Account notes:**
+- Home region is **Italy Northwest (Milan)** (`eu-milan-1`) — locked at signup
+- Milan only offers E5.Flex and E4.Flex shapes, neither of which are free tier
+- Free tier shapes (A1 Flex, E2.1.Micro) require subscribing to additional regions, which is blocked on the free account tier
+- Upgrading to Pay-as-you-go unlocks additional regions and removes capacity restrictions; free resources remain free
+
+**When you do get an instance, the setup is:**
+
+1. Create a VCN with internet connectivity (Networking → Virtual Cloud Networks → Start VCN Wizard → "Create VCN with Internet Connectivity").
+2. Open ports 80 and 443 in the VCN Security List (ingress, TCP, source 0.0.0.0/0).
+3. Open ports on the VM itself:
+   ```bash
+   sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
+   sudo iptables -I INPUT -p tcp --dport 443 -j ACCEPT
+   sudo netfilter-persistent save
+   ```
+4. Get a free domain from [duckdns.org](https://www.duckdns.org) pointing to the instance's public IP.
+5. Install Docker and Caddy:
+   ```bash
+   sudo apt update && sudo apt install -y docker.io netfilter-persistent
+   sudo usermod -aG docker ubuntu
+   # Install Caddy (see caddy.run for current apt instructions)
+   ```
+6. Configure Caddy (`/etc/caddy/Caddyfile`):
+   ```
+   yourdomain.duckdns.org {
+       reverse_proxy localhost:8000
+   }
+   ```
+7. Copy project files to the server and run:
    ```bash
    docker build -t meal-planner .
-   docker run -d \
-     --restart=always \
+   docker run -d --restart unless-stopped \
      -p 8000:8000 \
      --env-file .env \
      -v $(pwd)/credentials:/app/credentials \
+     --name meal-planner \
      meal-planner
    ```
-7. Configure nginx to forward `https://your-domain.com/webhook` → `http://localhost:8000/webhook`.
-
-### Setting the webhook (automatic)
-
-The bot sets its own webhook on startup via the `TELEGRAM_WEBHOOK_URL` env var — you don't need to do it manually. You can verify it worked by visiting:
-
-```
-https://api.telegram.org/bot<YOUR_TOKEN>/getWebhookInfo
-```
-
-It should show your URL and `"pending_update_count": 0`.
-
----
-
-## Bot Commands
-
-| Command | Description |
-|---------|-------------|
-| `/start` | Show help |
-| `/plan` | Generate this week's dinner plan |
-| `/add` | Add a new meal to the library |
-| `/generate` | Generate meal ideas with Claude |
-| `/meals` | List all meals (optionally filter: `/meals italian`) |
-| `/shopping` | Show current Todoist shopping list |
-| `/cancel` | Cancel current operation |
+8. Set `TELEGRAM_WEBHOOK_URL=https://yourdomain.duckdns.org/webhook` in `.env`.

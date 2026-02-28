@@ -156,6 +156,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "👋 *Meal Planner Bot*\n\n"
         "Commands:\n"
         "/plan — Generate and confirm this week's dinner plan\n"
+        "/week — Show the current confirmed week plan\n"
         "/add — Add a new meal to the library\n"
         "/edit — Edit an existing meal in the library\n"
         "/recipe — View or generate a recipe for a meal\n"
@@ -974,6 +975,25 @@ async def handle_recipe_view_callback(update: Update, context: ContextTypes.DEFA
 
 
 # ---------------------------------------------------------------------------
+# /week command
+# ---------------------------------------------------------------------------
+
+
+async def week(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    planner = _planner(context)
+    plan = planner._sheets.get_last_week_plan()
+    if not plan:
+        await update.message.reply_text(
+            "No confirmed week plan yet. Use /plan to generate one."
+        )
+        return
+    meals_by_id = await _load_plan_meals(planner, plan)
+    await update.message.reply_text(
+        _format_plan(plan, meals_by_id), parse_mode=ParseMode.MARKDOWN
+    )
+
+
+# ---------------------------------------------------------------------------
 # /today command
 # ---------------------------------------------------------------------------
 
@@ -1243,6 +1263,9 @@ def register_handlers(app: Application) -> None:
         per_message=False,
     )
     app.add_handler(recipe_conv)
+
+    # /week
+    app.add_handler(CommandHandler("week", week))
 
     # /today
     today_conv = ConversationHandler(
