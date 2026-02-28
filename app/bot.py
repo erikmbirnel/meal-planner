@@ -1038,20 +1038,12 @@ async def _generate_and_show_recipe(
     user_notes: str = "",
 ) -> int:
     planner = _planner(context)
-    meal_id = context.user_data.get("recipe_meal_id")
-    title = context.user_data.get("recipe_title")
-
-    if meal_id:
-        meal = planner._sheets.get_meal_by_id(meal_id)
-        instructions = planner._claude.generate_recipe(meal, user_notes=user_notes)
-        planner._sheets.save_recipe(meal_id, instructions, user_notes=user_notes)
-        meal_name = meal.name
-    else:
-        instructions = planner._claude.generate_recipe_by_title(title, user_notes=user_notes)
-        meal_name = title
-
+    meal_id = context.user_data["recipe_meal_id"]
+    meal = planner._sheets.get_meal_by_id(meal_id)
+    instructions = planner._claude.generate_recipe(meal, user_notes=user_notes)
+    planner._sheets.save_recipe(meal_id, instructions, user_notes=user_notes)
     recipe = {"instructions": instructions, "user_notes": user_notes}
-    return await _show_recipe(update, context, meal_name, recipe)
+    return await _show_recipe(update, context, meal.name, recipe)
 
 
 async def handle_recipe_notes_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1079,11 +1071,26 @@ async def recipe_notes_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def recipe_title_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """User typed a meal title; generate a recipe for it by name."""
+    """User typed a meal title; generate a meal record + recipe and save to library."""
     title = update.message.text.strip()
-    context.user_data["recipe_title"] = title
     await update.message.reply_text("⏳ Generating recipe…")
-    return await _generate_and_show_recipe(update, context)
+    planner = _planner(context)
+    result = planner._claude.generate_meal_with_recipe(title)
+    meal = result["meal"]
+    instructions = result["instructions"]
+
+    new_id = planner._sheets.add_meal(meal)
+    planner._sheets.save_recipe(new_id, instructions)
+
+    context.user_data["recipe_meal_id"] = new_id
+    context.user_data.pop("recipe_title", None)
+
+    await update.message.reply_text(
+        f"✅ *{meal.name}* added to your meal library.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    recipe = {"instructions": instructions, "user_notes": ""}
+    return await _show_recipe(update, context, meal.name, recipe)
 
 
 async def handle_recipe_view_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
