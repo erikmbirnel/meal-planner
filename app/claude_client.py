@@ -103,6 +103,21 @@ Example:
             meals.append(meal)
         return meals
 
+    def generate_recipe_by_title(self, title: str, user_notes: str = "") -> str:
+        prompt = (
+            f"Write a complete recipe for {title}. "
+            "Include a brief ingredients list followed by clear numbered cooking steps. "
+            "Be concise and practical. No intro or outro beyond the recipe itself."
+        )
+        if user_notes:
+            prompt += f"\n\nNotes from the cook:\n{user_notes}"
+        message = self._client.messages.create(
+            model=self._model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return message.content[0].text.strip()
+
     def generate_recipe(self, meal: Meal, user_notes: str = "") -> str:
         ing_lines = "\n".join(
             f"- {i.quantity} {i.unit} {i.name}".strip()

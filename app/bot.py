@@ -74,6 +74,8 @@ log = logging.getLogger(__name__)
     RECIPE_VIEW,
 ) = range(40, 43)
 
+RECIPE_TITLE = 43
+
 TODAY_NOTES = 50
 
 # ---------------------------------------------------------------------------
@@ -113,6 +115,7 @@ def _meals_keyboard(
     prefix: str,
     cols: int = 2,
     include_generate: bool = True,
+    include_title_search: bool = False,
 ) -> InlineKeyboardMarkup:
     rows = []
     row: list[InlineKeyboardButton] = []
@@ -125,6 +128,8 @@ def _meals_keyboard(
         rows.append(row)
     if include_generate:
         rows.append([InlineKeyboardButton("✨ Generate new with Claude", callback_data=f"{prefix}:generate")])
+    if include_title_search:
+        rows.append([InlineKeyboardButton("✏️ Type a meal name", callback_data="recipe_by_title")])
     rows.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel")])
     return InlineKeyboardMarkup(rows)
 
@@ -951,14 +956,13 @@ async def edit_cuisine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def recipe_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.pop("recipe_meal_id", None)
+    context.user_data.pop("recipe_title", None)
     planner = _planner(context)
     meals = planner._sheets.get_all_meals()
-    if not meals:
-        await update.message.reply_text("No meals yet. Use /add first.")
-        return ConversationHandler.END
     await update.message.reply_text(
         "🍳 Which meal's recipe do you want?",
-        reply_markup=_meals_keyboard(meals, prefix="recipe_select", include_generate=False),
+        reply_markup=_meals_keyboard(meals, prefix="recipe_select", include_generate=False, include_title_search=True),
     )
     return RECIPE_SELECT
 
@@ -971,6 +975,10 @@ async def handle_recipe_select_callback(update: Update, context: ContextTypes.DE
     if data == "cancel":
         await query.edit_message_text("Cancelled.")
         return ConversationHandler.END
+
+    if data == "recipe_by_title":
+        await query.edit_message_text("What meal would you like a recipe for? Type the name:")
+        return RECIPE_TITLE
 
     meal_id = int(data.split(":")[1])
     planner = _planner(context)
@@ -1030,14 +1038,20 @@ async def _generate_and_show_recipe(
     user_notes: str = "",
 ) -> int:
     planner = _planner(context)
-    meal_id = context.user_data["recipe_meal_id"]
-    meal = planner._sheets.get_meal_by_id(meal_id)
+    meal_id = context.user_data.get("recipe_meal_id")
+    title = context.user_data.get("recipe_title")
 
-    instructions = planner._claude.generate_recipe(meal, user_notes=user_notes)
-    planner._sheets.save_recipe(meal_id, instructions, user_notes=user_notes)
+    if meal_id:
+        meal = planner._sheets.get_meal_by_id(meal_id)
+        instructions = planner._claude.generate_recipe(meal, user_notes=user_notes)
+        planner._sheets.save_recipe(meal_id, instructions, user_notes=user_notes)
+        meal_name = meal.name
+    else:
+        instructions = planner._claude.generate_recipe_by_title(title, user_notes=user_notes)
+        meal_name = title
 
     recipe = {"instructions": instructions, "user_notes": user_notes}
-    return await _show_recipe(update, context, meal.name, recipe)
+    return await _show_recipe(update, context, meal_name, recipe)
 
 
 async def handle_recipe_notes_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1062,6 +1076,14 @@ async def recipe_notes_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     user_notes = update.message.text.strip()
     await update.message.reply_text("⏳ Generating recipe…")
     return await _generate_and_show_recipe(update, context, user_notes=user_notes)
+
+
+async def recipe_title_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """User typed a meal title; generate a recipe for it by name."""
+    title = update.message.text.strip()
+    context.user_data["recipe_title"] = title
+    await update.message.reply_text("⏳ Generating recipe…")
+    return await _generate_and_show_recipe(update, context)
 
 
 async def handle_recipe_view_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1361,6 +1383,7 @@ def register_handlers(app: Application) -> None:
         entry_points=[CommandHandler("recipe", recipe_start)],
         states={
             RECIPE_SELECT: [CallbackQueryHandler(handle_recipe_select_callback)],
+            RECIPE_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, recipe_title_text)],
             RECIPE_NOTES: [
                 CallbackQueryHandler(handle_recipe_notes_callback),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, recipe_notes_text),
