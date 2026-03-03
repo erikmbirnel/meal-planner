@@ -506,17 +506,17 @@ async def add_ingredients(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     planner = _planner(context)
     try:
         ingredients = planner._claude.parse_ingredients(raw)
-        context.user_data["new_meal"]["ingredients"] = ingredients
-        context.user_data["new_meal"].setdefault("servings", 4)
-        context.user_data["new_meal"].setdefault("cuisine", "")
-        context.user_data["new_meal"].setdefault("staple", False)
-        return await _show_add_confirm(update, context)
     except Exception as e:
         log.error("Failed to parse ingredients: %s", e)
         await update.message.reply_text(
             "⚠️ Couldn't parse that. Try again with one ingredient per line."
         )
         return ADD_INGREDIENTS
+    context.user_data["new_meal"]["ingredients"] = ingredients
+    context.user_data["new_meal"].setdefault("servings", 4)
+    context.user_data["new_meal"].setdefault("cuisine", "")
+    context.user_data["new_meal"].setdefault("staple", False)
+    return await _show_add_confirm(update, context)
 
 
 async def _show_add_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1420,6 +1420,7 @@ def register_handlers(app: Application) -> None:
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        allow_reentry=True,
         per_message=False,
     )
     app.add_handler(add_conv)
