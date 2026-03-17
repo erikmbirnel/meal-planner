@@ -1076,8 +1076,8 @@ async def _show_recipe(
     meal_name: str,
     recipe: dict,
 ) -> int:
-    notes_line = f"\n_Notes: {recipe['user_notes']}_" if recipe.get("user_notes") else ""
-    text = f"*{meal_name} — Recipe*{notes_line}\n\n{recipe['instructions']}"
+    notes_line = f"\nNotes: {recipe['user_notes']}" if recipe.get("user_notes") else ""
+    text = f"{meal_name} — Recipe{notes_line}\n\n{recipe['instructions']}"
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🔄 Regenerate", callback_data="recipe_regenerate"),
@@ -1086,11 +1086,11 @@ async def _show_recipe(
     ])
     if update.callback_query:
         await update.callback_query.edit_message_text(
-            text, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
+            text, reply_markup=keyboard
         )
     else:
         await update.message.reply_text(
-            text, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
+            text, reply_markup=keyboard
         )
     return RECIPE_VIEW
 
@@ -1148,10 +1148,7 @@ async def recipe_title_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data["recipe_meal_id"] = new_id
     context.user_data.pop("recipe_title", None)
 
-    await update.message.reply_text(
-        f"✅ *{meal.name}* added to your meal library.",
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    await update.message.reply_text(f"✅ {meal.name} added to your meal library.")
     recipe = {"instructions": instructions, "user_notes": ""}
     return await _show_recipe(update, context, meal.name, recipe)
 
@@ -1203,10 +1200,10 @@ async def week(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def _format_today_text(meal_name: str, ing_lines: str, recipe: Optional[dict]) -> str:
-    text = f"*Today: {meal_name}*\n\n*Ingredients:*\n{ing_lines}"
+    text = f"Today: {meal_name}\n\nIngredients:\n{ing_lines}"
     if recipe:
-        notes_line = f"\n_Notes: {recipe['user_notes']}_" if recipe.get("user_notes") else ""
-        text += f"\n\n*Recipe:*{notes_line}\n{recipe['instructions']}"
+        notes_line = f"\nNotes: {recipe['user_notes']}" if recipe.get("user_notes") else ""
+        text += f"\n\nRecipe:{notes_line}\n{recipe['instructions']}"
     return text
 
 
@@ -1307,9 +1304,9 @@ async def _today_generate_and_show(
     text = _format_today_text(meal.name, ing_lines, recipe)
 
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
+        await update.callback_query.edit_message_text(text)
     else:
-        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(text)
     return ConversationHandler.END
 
 
@@ -1396,6 +1393,7 @@ def register_handlers(app: Application) -> None:
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
+        allow_reentry=True,
     )
     app.add_handler(plan_conv)
 
@@ -1421,6 +1419,7 @@ def register_handlers(app: Application) -> None:
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
+        allow_reentry=True,
     )
     app.add_handler(add_conv)
 
@@ -1434,6 +1433,7 @@ def register_handlers(app: Application) -> None:
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
+        allow_reentry=True,
     )
     app.add_handler(gen_conv)
 
@@ -1450,6 +1450,7 @@ def register_handlers(app: Application) -> None:
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
+        allow_reentry=True,
     )
     app.add_handler(edit_conv)
 
@@ -1467,6 +1468,7 @@ def register_handlers(app: Application) -> None:
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
+        allow_reentry=True,
     )
     app.add_handler(recipe_conv)
 
@@ -1484,6 +1486,7 @@ def register_handlers(app: Application) -> None:
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
+        allow_reentry=True,
     )
     app.add_handler(today_conv)
 
